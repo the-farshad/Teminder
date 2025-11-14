@@ -470,14 +470,23 @@ Element TaskListView::render()
     }
     else if (current_view == "ai_suggestions")
     {
+        // Split AI text into lines for proper display and scrolling
+        ftxui::Elements ai_lines;
+        stringstream ss(status_message);
+        string line;
+        while (getline(ss, line))
+        {
+            ai_lines.push_back(ftxui::text(line));
+        }
+
         content = ftxui::vbox({
             header,
             ftxui::vbox({
                 ftxui::text("AI Suggestions") | ftxui::bold | ftxui::center,
-                ftxui::text(""),
-                ftxui::text(status_message) | ftxui::flex,
-                ftxui::text(""),
-                ftxui::text("Press any key to return..."),
+                ftxui::separator(),
+                ftxui::vbox(ai_lines) | ftxui::vscroll_indicator | ftxui::frame | ftxui::flex,
+                ftxui::separator(),
+                ftxui::text("Press any key to return...") | ftxui::center,
             }) | ftxui::border |
                 ftxui::flex,
             status_bar,
@@ -660,6 +669,21 @@ void TaskListView::toggle_task_completion()
 
     Task &task = tasks[selected_index];
     task.is_completed = !task.is_completed;
+
+    // Sync status and progress with completion state
+    if (task.is_completed)
+    {
+        task.status = 4; // Completed
+        task.progress = 100;
+    }
+    else
+    {
+        // When unmarking, return to previous state or In Progress
+        if (task.status == 4)
+        {
+            task.status = (task.progress > 0 && task.progress < 100) ? 1 : 0;
+        }
+    }
 
     if (db.update_task(task))
     {
