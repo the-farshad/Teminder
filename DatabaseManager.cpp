@@ -90,6 +90,18 @@ void DatabaseManager::initilize_database()
             cout << "Migration complete." << endl;
         }
 
+        // Migration: Add status column if it doesn't exist
+        try
+        {
+            SQLite::Statement check(*db, "SELECT status FROM tasks LIMIT 1");
+        }
+        catch (const exception &)
+        {
+            cout << "Migrating database: Adding status column..." << endl;
+            db->exec("ALTER TABLE tasks ADD COLUMN status INTEGER NOT NULL DEFAULT 0;");
+            cout << "Migration complete." << endl;
+        }
+
         cout << "Database initialized successfully." << endl;
     }
     catch (const exception &e)
@@ -104,8 +116,8 @@ int DatabaseManager::add_task(const Task &task)
     try
     {
         SQLite::Statement query(*db,
-                                "INSERT INTO tasks (description, is_completed, priority, created_at, due_date, parent_id, progress) "
-                                "VALUES (?, ?, ?, ?, ?, ?, ?)");
+                                "INSERT INTO tasks (description, is_completed, priority, created_at, due_date, parent_id, progress, status) "
+                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
 
         query.bind(1, task.description);
         query.bind(2, task.is_completed ? 1 : 0);
@@ -131,6 +143,7 @@ int DatabaseManager::add_task(const Task &task)
         }
 
         query.bind(7, task.progress);
+        query.bind(8, task.status);
 
         query.exec();
 
@@ -157,7 +170,7 @@ vector<Task> DatabaseManager::get_all_tasks(bool include_completed)
 
     try
     {
-        string query_str = "SELECT id, description, is_completed, priority, created_at, due_date, parent_id, progress FROM tasks";
+        string query_str = "SELECT id, description, is_completed, priority, created_at, due_date, parent_id, progress, status FROM tasks";
 
         if (!include_completed)
         {
@@ -188,6 +201,7 @@ vector<Task> DatabaseManager::get_all_tasks(bool include_completed)
             }
 
             task.progress = query.getColumn(7).getInt();
+            task.status = query.getColumn(8).getInt();
 
             // Load links
             task.links = get_task_links(task.id);
@@ -208,7 +222,7 @@ optional<Task> DatabaseManager::get_task_by_id(int task_id)
     try
     {
         SQLite::Statement query(*db,
-                                "SELECT id, description, is_completed, priority, created_at, due_date, parent_id, progress "
+                                "SELECT id, description, is_completed, priority, created_at, due_date, parent_id, progress, status "
                                 "FROM tasks WHERE id = ?");
 
         query.bind(1, task_id);
@@ -233,6 +247,7 @@ optional<Task> DatabaseManager::get_task_by_id(int task_id)
             }
 
             task.progress = query.getColumn(7).getInt();
+            task.status = query.getColumn(8).getInt();
 
             // Load links
             task.links = get_task_links(task.id);
@@ -254,7 +269,7 @@ bool DatabaseManager::update_task(const Task &task)
     {
         SQLite::Statement query(*db,
                                 "UPDATE tasks SET description = ?, is_completed = ?, priority = ?, "
-                                "due_date = ?, parent_id = ?, progress = ? WHERE id = ?");
+                                "due_date = ?, parent_id = ?, progress = ?, status = ? WHERE id = ?");
 
         query.bind(1, task.description);
         query.bind(2, task.is_completed ? 1 : 0);
@@ -279,7 +294,8 @@ bool DatabaseManager::update_task(const Task &task)
         }
 
         query.bind(6, task.progress);
-        query.bind(7, task.id);
+        query.bind(7, task.status);
+        query.bind(8, task.id);
 
         query.exec();
 
@@ -315,7 +331,7 @@ vector<Task> DatabaseManager::get_tasks_by_priority(int priority)
     try
     {
         SQLite::Statement query(*db,
-                                "SELECT id, description, is_completed, priority, created_at, due_date, parent_id, progress "
+                                "SELECT id, description, is_completed, priority, created_at, due_date, parent_id, progress, status "
                                 "FROM tasks WHERE priority = ? ORDER BY due_date ASC");
 
         query.bind(1, priority);
@@ -340,6 +356,7 @@ vector<Task> DatabaseManager::get_tasks_by_priority(int priority)
             }
 
             task.progress = query.getColumn(7).getInt();
+            task.status = query.getColumn(8).getInt();
 
             task.links = get_task_links(task.id);
             tasks.push_back(task);
@@ -361,7 +378,7 @@ vector<Task> DatabaseManager::get_overdue_tasks()
     {
         time_t now = time(nullptr);
         SQLite::Statement query(*db,
-                                "SELECT id, description, is_completed, priority, created_at, due_date, parent_id, progress "
+                                "SELECT id, description, is_completed, priority, created_at, due_date, parent_id, progress, status "
                                 "FROM tasks WHERE due_date IS NOT NULL AND due_date < ? AND is_completed = 0 "
                                 "ORDER BY due_date ASC");
 
@@ -387,6 +404,7 @@ vector<Task> DatabaseManager::get_overdue_tasks()
             }
 
             task.progress = query.getColumn(7).getInt();
+            task.status = query.getColumn(8).getInt();
             task.links = get_task_links(task.id);
             tasks.push_back(task);
         }
@@ -406,7 +424,7 @@ vector<Task> DatabaseManager::get_subtasks(int parent_id)
     try
     {
         SQLite::Statement query(*db,
-                                "SELECT id, description, is_completed, priority, created_at, due_date, parent_id, progress "
+                                "SELECT id, description, is_completed, priority, created_at, due_date, parent_id, progress, status "
                                 "FROM tasks WHERE parent_id = ? ORDER BY priority DESC");
 
         query.bind(1, parent_id);
@@ -431,6 +449,7 @@ vector<Task> DatabaseManager::get_subtasks(int parent_id)
             }
 
             task.progress = query.getColumn(7).getInt();
+            task.status = query.getColumn(8).getInt();
 
             task.links = get_task_links(task.id);
             tasks.push_back(task);

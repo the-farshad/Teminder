@@ -27,7 +27,7 @@ TaskListView::TaskListView(DatabaseManager &db_manager, AIAssistant &ai_assistan
       status_message("Welcome to Teminder!"),
       current_view("list"),
       show_progress(false), progress_value(0), progress_message(""),
-      input_description(""), input_priority(1), input_due_date(""), input_link(""), input_progress(0),
+      input_description(""), input_priority(1), input_due_date(""), input_link(""), input_progress(0), input_status(0),
       current_input_field(0)
 {
     refresh_tasks();
@@ -35,7 +35,27 @@ TaskListView::TaskListView(DatabaseManager &db_manager, AIAssistant &ai_assistan
 
 void TaskListView::refresh_tasks()
 {
-    tasks = db.get_all_tasks(show_completed);
+    vector<Task> all_tasks = db.get_all_tasks(show_completed);
+
+    // Reorder tasks: parent tasks first, then their subtasks below them
+    tasks.clear();
+    for (const auto &task : all_tasks)
+    {
+        if (!task.is_subtask())
+        {
+            // Add parent task
+            tasks.push_back(task);
+            // Add its subtasks right after
+            for (const auto &potential_subtask : all_tasks)
+            {
+                if (potential_subtask.parent_id.has_value() && potential_subtask.parent_id.value() == task.id)
+                {
+                    tasks.push_back(potential_subtask);
+                }
+            }
+        }
+    }
+
     if (selected_index >= static_cast<int>(tasks.size()))
     {
         selected_index = tasks.size() > 0 ? tasks.size() - 1 : 0;
@@ -46,8 +66,33 @@ string TaskListView::format_task(const Task &task, bool is_selected) const
 {
     stringstream ss;
 
-    // Checkbox
-    ss << (task.is_completed ? "[✓] " : "[ ] ");
+    // Indentation for subtasks
+    if (task.is_subtask())
+    {
+        ss << "  ↳ ";
+    }
+
+    // Status-based checkbox
+    if (task.status == 4 || task.is_completed) // Completed
+    {
+        ss << "[✓] ";
+    }
+    else if (task.status == 1) // In Progress
+    {
+        ss << "[▶] ";
+    }
+    else if (task.status == 2) // On Hold
+    {
+        ss << "[⏸] ";
+    }
+    else if (task.status == 3) // Canceled
+    {
+        ss << "[✖] ";
+    }
+    else // New
+    {
+        ss << "[ ] ";
+    }
 
     // Priority indicator
     if (task.priority == 2)
@@ -60,30 +105,123 @@ string TaskListView::format_task(const Task &task, bool is_selected) const
     // Description
     ss << task.description;
 
+    // Status and progress
+    if (task.status != 4 && task.status != 0)
+    {
+        ss << " [" << task.get_status_string();
+        if (task.progress > 0)
+        {
+            ss << " " << task.progress << "%";
+        }
+        ss << "]";
+    }
+    else if (task.progress > 0 && task.progress < 100)
+    {
+        ss << " [" << task.progress << "%]";
+    }
+
+    // Subtask count
+    auto subtasks = db.get_subtasks(task.id);
+    if (!subtasks.empty())
+    {
+        int completed = 0;
+        for (const auto &st : subtasks)
+        {
+            if (st.is_completed || st.status == 4)
+                completed++;
+        }
+        ss << " (" << completed << "/" << subtasks.size() << " subtasks)";
+    }
+
+    return ss.str();
+}
+
+string TaskListView::format_task_details(const Task &task) const
+{
+    stringstream ss;
+
+    ss << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+    ss << "  TASK DETAILS\n";
+    ss << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
+
+    // Status
+    ss << "Status: " << task.get_status_string();
+    if (task.status == 1 && task.progress > 0)
+    {
+        ss << " (" << task.progress << "%)";
+    }
+    ss << "\n";
+
+    // Priority
+    ss << "Priority: ";
+    if (task.priority == 2)
+        ss << "🔴 HIGH\n";
+    else if (task.priority == 1)
+        ss << "🟡 MEDIUM\n";
+    else
+        ss << "🟢 LOW\n";
+
+    // Description
+    ss << "\nDescription:\n  " << task.description << "\n";
+
+    // Created date
+    char created_buffer[80];
+    strftime(created_buffer, sizeof(created_buffer), "%Y-%m-%d %H:%M", localtime(&task.created_at));
+    ss << "\nCreated: " << created_buffer << "\n";
+
     // Due date
+    ss << "Due Date: ";
     if (task.due_date.has_value())
     {
-        ss << " (Due: " << task.get_due_date_string();
+        ss << task.get_due_date_string();
         if (task.is_overdue())
         {
-            ss << " - OVERDUE!";
+            ss << " ⚠️ OVERDUE!";
         }
-        ss << ")";
+        ss << "\n";
+    }
+    else
+    {
+        ss << "Not set\n";
     }
 
-    // Links indicator
+    // Progress bar
+    if (!task.is_completed)
+    {
+        ss << "\nProgress:\n  [";
+        int bar_width = 20;
+        int filled = (task.progress * bar_width) / 100;
+        for (int i = 0; i < bar_width; ++i)
+        {
+            if (i < filled)
+                ss << "█";
+            else
+                ss << "░";
+        }
+        ss << "] " << task.progress << "%\n";
+    }
+
+    // Links
     if (!task.links.empty())
     {
-        ss << " 🔗" << task.links.size();
+        ss << "\nLinks (" << task.links.size() << "):\n";
+        for (size_t i = 0; i < task.links.size(); ++i)
+        {
+            ss << "  " << (i + 1) << ". " << task.links[i] << "\n";
+        }
     }
 
-    // Subtask indicator
+    // Parent task info
     if (task.is_subtask())
     {
-        ss << " [subtask]";
+        auto parent = db.get_task_by_id(task.parent_id.value());
+        if (parent.has_value())
+        {
+            ss << "\n↑ Parent Task:\n  " << parent.value().description << "\n";
+        }
     }
 
-    // Get subtask count for this task
+    // Subtasks
     auto subtasks = db.get_subtasks(task.id);
     if (!subtasks.empty())
     {
@@ -93,14 +231,30 @@ string TaskListView::format_task(const Task &task, bool is_selected) const
             if (st.is_completed)
                 completed_subtasks++;
         }
-        ss << " [" << completed_subtasks << "/" << subtasks.size() << " subtasks]";
+
+        ss << "\n↓ Subtasks (" << completed_subtasks << "/" << subtasks.size() << " completed):\n";
+        for (size_t i = 0; i < subtasks.size(); ++i)
+        {
+            const auto &st = subtasks[i];
+            ss << "  " << (i + 1) << ". ";
+
+            if (st.is_completed)
+                ss << "[✓] ";
+            else if (st.progress > 0)
+                ss << "[▶] ";
+            else
+                ss << "[ ] ";
+
+            ss << st.description;
+
+            if (!st.is_completed && st.progress > 0)
+                ss << " (" << st.progress << "%)";
+
+            ss << "\n";
+        }
     }
 
-    // Progress bar
-    if (task.progress > 0)
-    {
-        ss << " [" << task.progress << "%]";
-    }
+    ss << "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 
     return ss.str();
 }
@@ -205,9 +359,75 @@ Element TaskListView::render()
 
     if (current_view == "list")
     {
+        // Create task list
+        ftxui::Elements task_elements;
+
+        if (tasks.empty())
+        {
+            task_elements.push_back(ftxui::text("No tasks found. Press 'a' to add a new task.") | ftxui::center);
+        }
+        else
+        {
+            for (size_t i = 0; i < tasks.size(); ++i)
+            {
+                const auto &task = tasks[i];
+                bool is_selected = (static_cast<int>(i) == selected_index);
+
+                auto task_text = ftxui::text(format_task(task, is_selected));
+
+                if (is_selected)
+                {
+                    task_elements.push_back(task_text | ftxui::inverted | ftxui::bold);
+                }
+                else if (task.is_overdue())
+                {
+                    task_elements.push_back(task_text | ftxui::color(ftxui::Color::Red));
+                }
+                else if (task.is_completed)
+                {
+                    task_elements.push_back(task_text | ftxui::dim);
+                }
+                else
+                {
+                    task_elements.push_back(task_text);
+                }
+            }
+        }
+
+        auto task_list_element = ftxui::vbox(task_elements) | ftxui::vscroll_indicator | ftxui::frame | ftxui::border;
+
+        // Create task details panel
+        Element details_panel;
+        if (!tasks.empty() && selected_index < static_cast<int>(tasks.size()))
+        {
+            // Split details text into lines for proper display
+            string details_text = format_task_details(tasks[selected_index]);
+            ftxui::Elements detail_lines;
+            stringstream ss(details_text);
+            string line;
+            while (getline(ss, line))
+            {
+                detail_lines.push_back(ftxui::text(line));
+            }
+
+            details_panel = ftxui::vbox(detail_lines) |
+                            ftxui::vscroll_indicator | ftxui::frame |
+                            ftxui::border | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 50);
+        }
+        else
+        {
+            details_panel = ftxui::vbox({
+                                ftxui::text("No task selected") | ftxui::center,
+                            }) |
+                            ftxui::border | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 50);
+        }
+
         content = ftxui::vbox({
             header,
-            create_task_list()->Render(),
+            ftxui::hbox({
+                task_list_element | ftxui::flex,
+                details_panel,
+            }) | ftxui::flex,
             create_menu()->Render(),
             status_bar,
         });
@@ -273,6 +493,29 @@ Element TaskListView::render()
         auto date_style = (current_input_field == 1) ? ftxui::bold | ftxui::color(ftxui::Color::Yellow) : ftxui::nothing;
         auto link_style = (current_input_field == 2) ? ftxui::bold | ftxui::color(ftxui::Color::Yellow) : ftxui::nothing;
         auto progress_style = (current_input_field == 3) ? ftxui::bold | ftxui::color(ftxui::Color::Yellow) : ftxui::nothing;
+        auto status_style = (current_input_field == 4) ? ftxui::bold | ftxui::color(ftxui::Color::Yellow) : ftxui::nothing;
+
+        string status_text;
+        switch (input_status)
+        {
+        case 0:
+            status_text = "New";
+            break;
+        case 1:
+            status_text = "In Progress";
+            break;
+        case 2:
+            status_text = "On Hold";
+            break;
+        case 3:
+            status_text = "Canceled";
+            break;
+        case 4:
+            status_text = "Completed";
+            break;
+        default:
+            status_text = "Unknown";
+        }
 
         content = ftxui::vbox({
             header,
@@ -292,11 +535,13 @@ Element TaskListView::render()
                 ftxui::separator(),
                 ftxui::hbox({ftxui::text("[Progress]: "), ftxui::text(to_string(input_progress) + "%") | ftxui::flex}) | progress_style,
                 ftxui::separator(),
+                ftxui::hbox({ftxui::text("[Status]: "), ftxui::text(status_text) | ftxui::flex}) | status_style,
+                ftxui::separator(),
                 ftxui::text(""),
                 ftxui::text("Controls:"),
                 ftxui::text("  Tab - Switch between fields"),
                 ftxui::text("  Type - Edit active field (yellow)"),
-                ftxui::text("  +/- - Change priority or progress"),
+                ftxui::text("  +/- - Change priority, progress or status"),
                 ftxui::text("  Backspace - Delete character"),
                 ftxui::text("  Enter - Save, ESC - Cancel"),
             }) | ftxui::border |
@@ -399,6 +644,7 @@ void TaskListView::add_task_dialog()
     input_due_date = "";
     input_link = "";
     input_progress = 0;
+    input_status = 0; // New
     current_input_field = 0;
 
     current_view = "add";
@@ -528,6 +774,18 @@ void TaskListView::save_task(bool is_edit)
     task.description = input_description;
     task.priority = input_priority;
     task.progress = input_progress;
+    task.status = input_status;
+
+    // If status is Completed (4), set progress to 100% and mark as completed
+    if (input_status == 4)
+    {
+        task.progress = 100;
+        task.is_completed = true;
+    }
+    else
+    {
+        task.is_completed = false;
+    }
 
     // Parse due date (accepts multiple formats)
     // Formats: "2025-11-20", "2025-11-20 14:30", "2025-11-20 14:30:00"
@@ -669,7 +927,19 @@ void TaskListView::save_subtask()
     subtask.description = input_description;
     subtask.priority = input_priority;
     subtask.progress = input_progress;
+    subtask.status = input_status;
     subtask.parent_id = tasks[selected_index].id; // Set parent
+
+    // If status is Completed (4), set progress to 100% and mark as completed
+    if (input_status == 4)
+    {
+        subtask.progress = 100;
+        subtask.is_completed = true;
+    }
+    else
+    {
+        subtask.is_completed = false;
+    }
 
     // Parse due date (same logic as save_task)
     if (!input_due_date.empty())
@@ -853,8 +1123,8 @@ void TaskListView::run()
             }
             else if (event == Event::Tab)
             {
-                // Cycle through fields: description -> due_date -> link -> progress -> description
-                current_input_field = (current_input_field + 1) % 4;
+                // Cycle through fields: description -> due_date -> link -> progress -> status -> description
+                current_input_field = (current_input_field + 1) % 5;
                 return true;
             }
             else if (event == Event::Backspace)
@@ -877,7 +1147,7 @@ void TaskListView::run()
             }
             else if (event == Event::Character('+'))
             {
-                // Change priority when in description field, progress when in progress field
+                // Change priority when in description field, progress when in progress field, status when in status field
                 if (current_input_field == 0 && input_priority < 2)
                 {
                     input_priority++;
@@ -886,6 +1156,10 @@ void TaskListView::run()
                 {
                     input_progress += 5; // Increment by 5%
                     if (input_progress > 100) input_progress = 100;
+                }
+                else if (current_input_field == 4 && input_status < 4)
+                {
+                    input_status++;
                 }
                 else
                 {
@@ -907,7 +1181,7 @@ void TaskListView::run()
             }
             else if (event == Event::Character('-'))
             {
-                // Change priority when in description field, progress when in progress field
+                // Change priority when in description field, progress when in progress field, status when in status field
                 if (current_input_field == 0 && input_priority > 0)
                 {
                     input_priority--;
@@ -916,6 +1190,10 @@ void TaskListView::run()
                 {
                     input_progress -= 5; // Decrement by 5%
                     if (input_progress < 0) input_progress = 0;
+                }
+                else if (current_input_field == 4 && input_status > 0)
+                {
+                    input_status--;
                 }
                 else
                 {
@@ -1101,6 +1379,7 @@ void TaskListView::edit_task_dialog()
     input_due_date = task.due_date.has_value() ? task.get_due_date_string() : "";
     input_link = task.links.empty() ? "" : task.links[0];
     input_progress = task.progress;
+    input_status = task.status;
     current_input_field = 0;
 
     current_view = "edit";

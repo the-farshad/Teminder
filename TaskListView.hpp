@@ -132,6 +132,13 @@ private:
      */
     string format_task(const Task &task, bool is_selected) const;
 
+    /**
+     * @brief Format detailed task information for the details panel
+     * @param task The task to format
+     * @return Formatted string with full task details
+     */
+    string format_task_details(const Task &task) const;
+
     // References and pointers
     DatabaseManager &db;
     AIAssistant &ai;
@@ -154,5 +161,6 @@ private:
     string input_due_date;
     string input_link;
     int input_progress;
-    int current_input_field; // 0=description, 1=due_date, 2=link, 3=progress
+    int input_status;
+    int current_input_field; // 0=description, 1=due_date, 2=link, 3=progress, 4=status
 };

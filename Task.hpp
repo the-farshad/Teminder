@@ -30,20 +30,21 @@ struct Task
     vector<int> tags;          // Associated tag IDs
     optional<int> parent_id;   // Optional parent task ID for subtasks
     int progress;              // Task progress (0-100)
+    int status;                // Task status: 0=New, 1=In Progress, 2=On Hold, 3=Canceled, 4=Completed
 
     /**
      * @brief Default Constructor
      */
     Task()
         : id(0), description(""), is_completed(false),
-          priority(0), created_at(time(nullptr)), due_date(nullopt), links({}), tags({}), parent_id(nullopt), progress(0) {}
+          priority(0), created_at(time(nullptr)), due_date(nullopt), links({}), tags({}), parent_id(nullopt), progress(0), status(0) {}
     /**
      * @brief Constructor with parameters
      */
     Task(int id, const string &desc, bool completed, int prio,
          time_t created, optional<time_t> due = nullopt,
-         vector<string> task_links = {}, vector<int> task_tags = {}, optional<int> task_parent_id = nullopt, int task_progress = 0)
-        : id(id), description(desc), is_completed(completed), priority(prio), created_at(created), due_date(due), links(task_links), tags(task_tags), parent_id(task_parent_id), progress(task_progress) {}
+         vector<string> task_links = {}, vector<int> task_tags = {}, optional<int> task_parent_id = nullopt, int task_progress = 0, int task_status = 0)
+        : id(id), description(desc), is_completed(completed), priority(prio), created_at(created), due_date(due), links(task_links), tags(task_tags), parent_id(task_parent_id), progress(task_progress), status(task_status) {}
     /**
      * @brief Get a human-readable priority string
      */
@@ -93,5 +94,27 @@ struct Task
     bool is_subtask() const
     {
         return parent_id.has_value();
+    }
+
+    /**
+     * @brief Get status string
+     */
+    string get_status_string() const
+    {
+        switch (status)
+        {
+        case 0:
+            return "New";
+        case 1:
+            return "In Progress";
+        case 2:
+            return "On Hold";
+        case 3:
+            return "Canceled";
+        case 4:
+            return "Completed";
+        default:
+            return "Unknown";
+        }
     }
 };
