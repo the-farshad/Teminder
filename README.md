@@ -28,7 +28,7 @@ Before building Teminder, ensure you have the following installed:
 * **CMake:** Version 3.16 or higher
 * **Git:** For cloning repositories
 * **curl/libcurl:** For HTTP requests (usually pre-installed)
-* **Redis (Optional):** For in-memory caching - [Install Redis](https://redis.io/docs/getting-started/)
+* **Redis (Optional):** For in-memory caching - [Install Redis](https://redis.io/docs/latest/get-started/)
 * **Ollama (Optional):** For AI features - [Install Ollama](https://ollama.ai/)
 * **Docker & Docker Compose (Optional):** For containerized deployment
 
